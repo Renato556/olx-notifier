@@ -2,15 +2,18 @@
 
 Monitora múltiplos termos de busca na OLX e envia notificações via [ntfy.sh](https://ntfy.sh) quando novos anúncios aparecem.
 
-## Arquivos
+## Estrutura do repositório
 
 ```
-olx-macbook-notifier/
-├── config.yaml       # Manifesto do add-on: nome, schema das opções, arquiteturas
-├── Dockerfile        # Imagem Alpine com Python + curl_cffi
-├── entrypoint.sh     # Scheduler: lê options.json, dispara queries no intervalo certo
-├── requirements.txt  # Dependências Python
-└── scraper.py        # Scraping da OLX, filtros e envio de notificações
+olx-notifier/              # repositório raiz
+├── repository.yaml        # identifica o repo como fonte de add-ons para o HAOS
+├── README.md
+└── olx-notifier/          # pasta do add-on
+    ├── config.yaml        # manifesto: nome, schema das opções, arquiteturas
+    ├── Dockerfile         # imagem Alpine com Python + curl_cffi
+    ├── entrypoint.sh      # scheduler: lê options.json, dispara queries no intervalo certo
+    ├── requirements.txt   # dependências Python
+    └── scraper.py         # scraping da OLX, filtros e envio de notificações
 ```
 
 ## Instalação
@@ -64,7 +67,7 @@ export QUERIES_JSON='[{
   "blocked_keywords": ["defeito"]
 }]'
 
-DATA_DIR=/tmp/olx-test python3 scraper.py
+DATA_DIR=/tmp/olx-test python3 olx-notifier/scraper.py
 ```
 
 Os arquivos de estado ficam em `DATA_DIR` (`seen_<query>.json` e `last_run.json`). Delete-os para forçar reprocessamento de todos os anúncios.
@@ -100,7 +103,7 @@ entrypoint.sh
 
 ### Adicionando suporte a uma nova região
 
-A função `is_bh_region()` em `scraper.py` lista as cidades reconhecidas como BH e região. Para adicionar outra região basta estender essa lista ou, futuramente, torná-la configurável por query.
+A função `is_bh_region()` em `olx-notifier/scraper.py` lista as cidades reconhecidas como BH e região. Para adicionar outra região basta estender essa lista ou, futuramente, torná-la configurável por query.
 
 ### Bypass de bot detection
 
