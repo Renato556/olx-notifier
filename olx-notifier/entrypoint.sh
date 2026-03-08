@@ -134,6 +134,91 @@ if not ran_any:
 PYEOF
 }
 
+# ---------------------------------------------------------------------------
+# Listener de stdin: processa comandos enviados via API do Supervisor
+# Formato esperado (JSON): {"command": "clear", "query": "<slug-ou-all>"}
+# Exemplo de uso via curl:
+#   curl -X POST http://supervisor/addons/olx_notifier/stdin \
+#        -H "Authorization: Bearer $SUPERVISOR_TOKEN" \
+#        -d '{"command":"clear","query":"all"}'
+# ---------------------------------------------------------------------------
+handle_stdin() {
+    python3 - <<'PYEOF'
+import json, sys, os, re
+from pathlib import Path
+
+data_dir = Path("/data")
+
+def _seen_file(slug):
+    """Retorna o caminho do arquivo seen para um slug."""
+    return data_dir / f"seen_{slug}.json"
+
+def clear_query(slug):
+    """Remove o arquivo seen para o slug dado."""
+    f = _seen_file(slug)
+    if f.exists():
+        f.unlink()
+        print(f"[stdin] Registros vistos removidos: {f.name}", flush=True)
+    else:
+        print(f"[stdin] Arquivo não encontrado: {f.name}", flush=True)
+
+def list_seen_files():
+    """Lista todos os arquivos seen_*.json existentes."""
+    return sorted(data_dir.glob("seen_*.json"))
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        msg = json.loads(line)
+    except json.JSONDecodeError:
+        print(f"[stdin] Comando inválido (JSON esperado): {line!r}", flush=True)
+        continue
+
+    command = msg.get("command", "")
+
+    if command == "clear":
+        query_slug = msg.get("query", "").strip()
+        if not query_slug:
+            print("[stdin] Parâmetro 'query' ausente. Use 'all' para limpar tudo.", flush=True)
+            continue
+
+        if query_slug == "all":
+            files = list_seen_files()
+            if not files:
+                print("[stdin] Nenhum arquivo de registros vistos encontrado.", flush=True)
+            for f in files:
+                f.unlink()
+                print(f"[stdin] Removido: {f.name}", flush=True)
+        else:
+            # Normaliza o slug da mesma forma que o scraper
+            slug = re.sub(r"[^\w]+", "_", query_slug.lower()).strip("_")
+            clear_query(slug)
+
+    elif command == "list":
+        files = list_seen_files()
+        if not files:
+            print("[stdin] Nenhum arquivo de registros vistos encontrado.", flush=True)
+        else:
+            print("[stdin] Arquivos de registros vistos:", flush=True)
+            for f in files:
+                try:
+                    ids = json.loads(f.read_text())
+                    count = len(ids)
+                except Exception:
+                    count = "?"
+                slug = f.stem.removeprefix("seen_")
+                print(f"[stdin]   - {slug}: {count} registros ({f.name})", flush=True)
+
+    else:
+        print(f"[stdin] Comando desconhecido: {command!r}. Comandos disponíveis: clear, list", flush=True)
+PYEOF
+}
+
+# Inicia o listener de stdin em background
+handle_stdin &
+
 # Executa imediatamente na inicialização (zera timestamps para forçar execução)
 echo "Executando verificação inicial..."
 python3 -c "

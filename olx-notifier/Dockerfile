@@ -22,9 +22,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
-# Copia o scraper e o entrypoint
+# Copia o scraper, o entrypoint e o script auxiliar de limpeza
 COPY scraper.py .
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY clear_seen.sh /clear_seen.sh
+RUN chmod +x /entrypoint.sh /clear_seen.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
