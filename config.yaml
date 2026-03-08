@@ -1,0 +1,43 @@
+name: "OLX Notifier"
+description: "Monitora anúncios na OLX para múltiplas buscas e notifica via ntfy.sh."
+version: "2.0.0"
+slug: "olx-notifier"
+init: false
+arch:
+  - aarch64
+  - amd64
+
+options:
+  ntfy_server: "https://ntfy.sh"
+  queries:
+    - search_query: "macbook"
+      enabled: true
+      scope: "bh_and_brazil"
+      ntfy_topic_bh: "olx-mac-bh"
+      ntfy_topic_br: "olx-mac-brasil"
+      check_interval_minutes: 15
+      price_min: 2000
+      price_max: 6000
+      blocked_keywords:
+        - "\\bi[579]\\b"
+        - "defeito"
+        - "\\b20(1[1-9]|20)\\b"
+        - "(?<!\\d)8\\s*gb(?!\\w)"
+        - "\\bm[12]\\b"
+
+schema:
+  ntfy_server: str
+  queries:
+    - search_query: str
+      enabled: bool
+      scope: list(bh_only|bh_and_brazil)
+      ntfy_topic_bh: str
+      ntfy_topic_br: str
+      check_interval_minutes: int
+      price_min: int?
+      price_max: int?
+      blocked_keywords:
+        - str
+
+map:
+  - data
