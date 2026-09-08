@@ -18,6 +18,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -61,15 +62,15 @@ def build_urls(query: dict) -> "tuple[str, str | None]":
         price_params += f"&pe={pe}"
 
     url_bh = (
-        f"https://www.olx.com.br/informatica/notebooks/estado-mg/belo-horizonte-e-regiao"
-        f"?q={q}{price_params}&o=1"
+        f"https://www.olx.com.br/estado-mg/belo-horizonte-e-regiao"
+        f"?q={q}{price_params}&sf=1"
     )
 
     url_br = None
     if query.get("scope", "bh_only") == "bh_and_brazil":
         url_br = (
             f"https://www.olx.com.br/brasil"
-            f"?q={q}{price_params}&delivery=1&o=1"
+            f"?q={q}{price_params}&sf=1&opst=2"
         )
 
     return url_bh, url_br
@@ -150,6 +151,13 @@ def fetch_ads(scraper: cffi_requests.Session, url: str) -> "list[dict]":
             log.info("Extraídos %d anúncios via __NEXT_DATA__ de %s", len(ads), url)
             return ads
 
+    # Next.js App Router: dados dos anúncios podem vir embutidos no HTML/
+    # flight data, com campos escapados como \"ads\": [...].
+    ads = _parse_embedded_ads_blob(resp.text)
+    if ads:
+        log.info("Extraídos %d anúncios via blob embutido de %s", len(ads), url)
+        return ads
+
     # Fallback: parsing HTML direto dos cards
     ads = _parse_html_cards(soup, url)
     log.info("Extraídos %d anúncios via HTML de %s", len(ads), url)
@@ -175,29 +183,120 @@ def _parse_next_data(raw_json: str) -> list[dict]:
 
     for item in listings:
         try:
-            ad_id = str(item.get("listId") or item.get("id") or "")
-            title = item.get("subject") or item.get("title") or ""
-            price_raw = item.get("priceValue") or item.get("price") or ""
-            price_val = parse_price(str(price_raw))
-            ad_url = str(item.get("friendlyUrl") or item.get("url") or item.get("link") or "")
-            location = item.get("location") or item.get("municipality") or ""
-            delivery = bool(item.get("olxDelivery") or item.get("olxDeliveryBadgeEnabled")
-                            or item.get("delivery") or item.get("hasDelivery"))
-
-            if ad_id and title:
-                ads.append(
-                    {
-                        "id": ad_id,
-                        "title": title,
-                        "price": price_val,
-                        "url": ad_url,
-                        "location": location,
-                        "delivery": delivery,
-                    }
-                )
+            normalized = _normalize_ad_item(item)
+            if normalized:
+                ads.append(normalized)
         except Exception:
             continue
     return ads
+
+
+def _parse_embedded_ads_blob(raw_html: str) -> list[dict]:
+    """Extrai anúncios de um blob JSON escapado embutido no HTML."""
+    ads = []
+    for needle in ("\\\"ads\\\":[", '"ads":['):
+        start = raw_html.find(needle)
+        if start == -1:
+            continue
+
+        arr_start = raw_html.find("[", start)
+        if arr_start == -1:
+            continue
+
+        arr_end = _find_balanced_segment(raw_html, arr_start, "[", "]")
+        if arr_end == -1:
+            continue
+
+        raw_arr = raw_html[arr_start : arr_end + 1]
+        try:
+            # Apenas remove a camada de escape das aspas; o JSON em si
+            # continua responsável por decodificar \\uXXXX corretamente.
+            decoded = raw_arr.replace(r'\"', '"').replace(r'\\/', '/')
+            items = json.loads(decoded)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+
+        if not isinstance(items, list):
+            continue
+
+        for item in items:
+            try:
+                normalized = _normalize_ad_item(item)
+                if normalized:
+                    ads.append(normalized)
+            except Exception:
+                continue
+
+        if ads:
+            return ads
+
+    return ads
+
+
+def _find_balanced_segment(text: str, start: int, open_ch: str, close_ch: str) -> int:
+    """Encontra o índice final de um segmento com delimitadores balanceados."""
+    depth = 0
+    for idx in range(start, len(text)):
+        ch = text[idx]
+        if ch == open_ch:
+            depth += 1
+        elif ch == close_ch:
+            depth -= 1
+            if depth == 0:
+                return idx
+    return -1
+
+
+def _normalize_ad_item(item: dict) -> "dict | None":
+    """Normaliza um item bruto da OLX para o formato interno do scraper."""
+    if not isinstance(item, dict):
+        return None
+
+    ad_id = str(item.get("listId") or item.get("id") or "")
+    title = item.get("subject") or item.get("title") or ""
+    price_raw = item.get("priceValue") or item.get("price") or ""
+    price_val = parse_price(str(price_raw))
+
+    ad_url = str(item.get("friendlyUrl") or item.get("url") or item.get("link") or "")
+    if ad_url.startswith("/"):
+        ad_url = "https://www.olx.com.br" + ad_url
+
+    location = item.get("location") or item.get("municipality") or ""
+    if not location:
+        location_details = item.get("locationDetails")
+        if isinstance(location_details, dict):
+            location = (
+                location_details.get("municipality")
+                or location_details.get("name")
+                or location_details.get("city")
+                or ""
+            )
+
+    delivery = bool(
+        item.get("olxDelivery")
+        or item.get("olxDeliveryBadgeEnabled")
+        or item.get("delivery")
+        or item.get("hasDelivery")
+    )
+    if not delivery:
+        olx_delivery = item.get("olxDelivery")
+        if isinstance(olx_delivery, dict):
+            delivery = bool(olx_delivery.get("enabled") or olx_delivery.get("badgeEnabled"))
+
+    if ad_id and title:
+        return {
+            "id": ad_id,
+            "listId": ad_id,
+            "title": title,
+            "subject": title,
+            "price": price_val,
+            "priceValue": price_val,
+            "url": ad_url,
+            "location": location,
+            "delivery": delivery,
+        }
+
+    return None
 
 
 def _parse_html_cards(soup: BeautifulSoup, source_url: str) -> list[dict]:
@@ -253,8 +352,11 @@ def _parse_html_cards(soup: BeautifulSoup, source_url: str) -> list[dict]:
                 ads.append(
                     {
                         "id": ad_id,
+                        "listId": ad_id,
                         "title": title,
+                        "subject": title,
                         "price": price_val,
+                        "priceValue": price_val,
                         "url": ad_url,
                         "location": location,
                         "delivery": delivery,
@@ -334,46 +436,75 @@ def send_notification(new_ads: list[dict], topic: str, search_query: str) -> Non
 
     import urllib.request
 
-    count = len(new_ads)
-    title = f"OLX {search_query}: {count} novo{'s' if count > 1 else ''} anuncio{'s' if count > 1 else ''}"
+    def _chunks(items: list[dict], size: int) -> list[list[dict]]:
+        return [items[i : i + size] for i in range(0, len(items), size)]
 
-    blocks = []
-    for ad in new_ads:
-        price_str = f"R$ {ad['price']:,.0f}".replace(",", ".") if ad["price"] else "Preço não informado"
-        delivery_str = " 📦 Entrega" if ad["delivery"] else ""
-        loc = ad.get("location") or "—"
-        ad_url = ad.get("url") or ""
-        blocks.append(
-            f"**{ad['title'][:60]}**\n"
-            f"{price_str} · {loc}{delivery_str}\n"
-            f"[Ver anúncio]({ad_url})"
+    def _ad_title(ad: dict) -> str:
+        text = str(ad.get("subject") or ad.get("title") or "Sem título").strip() or "Sem título"
+        return unicodedata.normalize("NFC", text)
+
+    def _ad_url(ad: dict) -> str:
+        return str(ad.get("url") or ad.get("link") or "").strip()
+
+    def _ad_location(ad: dict) -> str:
+        return str(ad.get("location") or ad.get("localizacao") or "").strip()
+
+    def _ad_price_text(ad: dict) -> str:
+        price = ad.get("price") if ad.get("price") is not None else ad.get("priceValue")
+        if price is None or price == "":
+            return "R$ ?"
+        if isinstance(price, (int, float)):
+            if isinstance(price, float) and not price.is_integer():
+                return f"R$ {price:.2f}".replace(".", ",")
+            return f"R$ {int(price):,}".replace(",", ".")
+        text = str(price).strip()
+        if text.lower().startswith("r$"):
+            return text
+        return f"R$ {text}"
+
+    batches = _chunks(new_ads, 4)
+    for idx, batch in enumerate(batches, start=1):
+        count = len(batch)
+        title = f"Novos anuncios de {search_query}"
+        if len(batches) > 1:
+            title = f"{title} ({idx}/{len(batches)})"
+
+        blocks = []
+        for ad in batch:
+            titulo = _ad_title(ad)[:90]
+            ad_url = _ad_url(ad)
+            price_str = _ad_price_text(ad)
+            loc = _ad_location(ad)
+            if loc:
+                loc = f"\n📍 {loc}"
+            blocks.append(
+                f"🎮 **[{titulo}]({ad_url})**\n"
+                f"💰 {price_str}{loc}"
+            )
+
+        body = "\n\n".join(blocks)
+        body_bytes = body.encode("utf-8")
+        if len(body_bytes) > NTFY_MAX_BYTES:
+            truncated = body_bytes[: NTFY_MAX_BYTES - 100]
+            body = truncated.decode("utf-8", errors="ignore") + "\n\n…(truncado)"
+
+        req = urllib.request.Request(
+            f"{NTFY_SERVER}/{topic}",
+            data=body.encode("utf-8"),
+            method="POST",
+            headers={
+                "Title": title,
+                "Priority": "default",
+                "Tags": "video_game,moneybag",
+                "Content-Type": "text/markdown; charset=utf-8",
+                "Markdown": "yes",
+            },
         )
-
-    separator = "\n\n---\n\n"
-    body = separator.join(blocks)
-
-    body_bytes = body.encode("utf-8")
-    if len(body_bytes) > NTFY_MAX_BYTES:
-        truncated = body_bytes[: NTFY_MAX_BYTES - 100]
-        body = truncated.decode("utf-8", errors="ignore") + "\n\n…(truncado)"
-
-    req = urllib.request.Request(
-        f"{NTFY_SERVER}/{topic}",
-        data=body.encode("utf-8"),
-        method="POST",
-        headers={
-            "Title": title,
-            "Priority": "default",
-            "Tags": "shopping_cart",
-            "Content-Type": "text/plain; charset=utf-8",
-            "Markdown": "yes",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            log.info("Notificação enviada para %s: HTTP %s", topic, resp.status)
-    except Exception as exc:
-        log.error("Falha ao enviar notificação para %s: %s", topic, exc)
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                log.info("Notificação enviada para %s: HTTP %s (%d anúncio(s))", topic, resp.status, count)
+        except Exception as exc:
+            log.error("Falha ao enviar notificação para %s: %s", topic, exc)
 
 
 # ---------------------------------------------------------------------------

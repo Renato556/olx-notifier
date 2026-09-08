@@ -6,6 +6,12 @@ FROM $BUILD_FROM
 LABEL maintainer="olx-notifier"
 LABEL description="Monitora anúncios na OLX e notifica via ntfy.sh"
 
+# Garante UTF-8 em stdout/stderr e no runtime Python para preservar acentuação.
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONUTF8=1 \
+    PYTHONIOENCODING=utf-8
+
 # Instala Python, pip e dependências de sistema
 RUN apk add --no-cache \
     python3 \

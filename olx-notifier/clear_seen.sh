@@ -20,6 +20,11 @@
 #        -d '{"command":"list"}'
 # ---------------------------------------------------------------------------
 
+export LANG="${LANG:-C.UTF-8}"
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+export PYTHONUTF8="${PYTHONUTF8:-1}"
+export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"
+
 DATA_DIR="${DATA_DIR:-/data}"
 
 list_files() {

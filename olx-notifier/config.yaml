@@ -9,22 +9,21 @@ arch:
   - amd64
 
 options:
-  ntfy_server: "https://ntfy.sh"
+  ntfy_server: https://ntfy.sh
   queries:
-    - search_query: "macbook"
+    - search_query: xbox series s
       enabled: true
-      scope: "bh_and_brazil"
-      ntfy_topic_bh: "olx-mac-bh"
-      ntfy_topic_br: "olx-mac-brasil"
+      scope: bh_and_brazil
+      ntfy_topic_bh: xbox-90
+      ntfy_topic_br: xbox-90-br
       check_interval_minutes: 15
-      price_min: 2000
-      price_max: 6000
+      price_min: 1000
+      price_max: 1900
       blocked_keywords:
-        - "\\bi[579]\\b"
-        - "defeito"
-        - "\\b20(1[1-9]|20)\\b"
-        - "(?<!\\d)8\\s*gb(?!\\w)"
-        - "\\bm[12]\\b"
+        - defeito
+        - xbox one
+        - desbloqueado
+
 
 schema:
   ntfy_server: str
