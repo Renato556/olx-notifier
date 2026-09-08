@@ -1,6 +1,6 @@
 name: "OLX Notifier"
 description: "Monitora anúncios na OLX para múltiplas buscas e notifica via ntfy.sh."
-version: "2.1.0"
+version: "2.1.1"
 slug: "olx-notifier"
 init: false
 stdin: true
